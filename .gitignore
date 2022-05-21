@@ -131,3 +131,4 @@ config.yml
 bot.db
 session.txt
 data.json
+region_codes.json
