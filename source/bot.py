@@ -1,5 +1,5 @@
 from importlib.resources import path
-import pathlib,json,urllib.request
+import pathlib,json,urllib.request,re
 from init import *
 from pynina import Nina, ApiError
 loop = None
@@ -18,6 +18,8 @@ async def tell(room, message):
                     server.Region = await getRegionCode(message.body)
                     if server.Region == None:
                         await bot.api.send_text_message(server.room,'Ort wurde nicht gefunden !')
+                    else:
+                        await save_servers()
 @bot.listener.on_custom_event
 async def join(room, event):
     pass
@@ -36,20 +38,50 @@ async def getRegionCode(plz):
         if plz in rec[1]:
             return rec[0][:6]+'000000'
     return None
+def extract_id(post):
+    res = None
+    if 'alt="id@' in str(post):
+        res = post[post.find('alt="id@')+8:]
+        res = res[:res.find('"')]
+    return res
+async def post_html_entry(server,html_body,sender):
+    global servers
+    mcontent={
+        "msgtype": "m.text",#or m.notice seems to be shown more transparent
+        "body": re.sub('<[^<]+?>', '', html_body),
+        "format": "org.matrix.custom.html",
+        "formatted_body": sender+'<br>'+html_body
+        }
+    await bot.api.async_client.room_send(room_id=server.room,
+                                          message_type="m.room.message",
+                                          content=mcontent)
 async def check_server(server):
     global lastsend,servers
     n: Nina = Nina()
     if not hasattr(server,'Region'):
         await bot.api.send_text_message(server.room,'Für welchen Ort möchten Sie gewarnet werden ?')
         server.Region = None
+    if not hasattr(server,'LastId'):
+        server.LastId = None
     while True:
         if server.Region:
             n.addRegion(server.Region)
             try:
                 await n.update()
-                for i in n.warnings[server.Region]:
-                    print(i)
-                    print(i.isValid())
+                events = await get_room_events(bot.api.async_client,server.room,500)
+                for msg in n.warnings[server.Region]:
+                    if msg.isValid():
+                        for event in events:
+                            nLastId = None
+                            if hasattr(event,'formatted_body'):
+                                nLastId = extract_id(event.formatted_body)
+                                if nLastId != msg.id:
+                                    nLastId = None
+                                else: break
+                        if not nLastId:                        
+                            sender = '<a href=\"%s\">%s</a><font size="-1"> %s</font>&nbsp;<a href=\"%s\" alt="id@%s" style="display: none">🌐</a>' % ('','NINA','','',msg.id)
+                            await post_html_entry(server,msg.headline+'<br>'+msg.description,sender)
+                            print(msg)
             except ApiError as error:
                 await bot.api.send_text_message(server.room,str(error))
             except BaseException as e:
