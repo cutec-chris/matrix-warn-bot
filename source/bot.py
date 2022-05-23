@@ -14,12 +14,14 @@ async def tell(room, message):
     if match.is_not_from_this_bot():
         for server in servers:
             if server.room == room.room_id:
-                if server.Region == None:
-                    server.Region = await getRegionCode(message.body)
-                    if server.Region == None:
-                        await bot.api.send_text_message(server.room,'Ort wurde nicht gefunden !')
-                    else:
-                        await save_servers()
+                nRegion = await getRegionCode(message.body)
+                if nRegion == None:
+                    await bot.api.send_text_message(server.room,'Ort wurde nicht gefunden !')
+                else:
+                    if not nRegion in server.Region:
+                        server.Region.append(nRegion)
+                        await bot.api.send_text_message(server.room,'Ort hinzugefügt.')
+                    await save_servers()
 @bot.listener.on_custom_event
 async def join(room, event):
     pass
@@ -60,28 +62,32 @@ async def check_server(server):
     n: Nina = Nina()
     if not hasattr(server,'Region'):
         await bot.api.send_text_message(server.room,'Für welchen Ort möchten Sie gewarnet werden ?')
-        server.Region = None
+        server.Region = []
     if not hasattr(server,'LastId'):
         server.LastId = None
     while True:
         if server.Region:
-            n.addRegion(server.Region)
+            if isinstance(server.Region, str):
+                server.Region = [server.Region]
+            for region in server.Region:
+                n.addRegion(region)
             try:
                 await n.update()
                 events = await get_room_events(bot.api.async_client,server.room,500)
-                for msg in n.warnings[server.Region]:
-                    if msg.isValid():
-                        for event in events:
-                            nLastId = None
-                            if hasattr(event,'formatted_body'):
-                                nLastId = extract_id(event.formatted_body)
-                                if nLastId != msg.id:
-                                    nLastId = None
-                                else: break
-                        if not nLastId:                        
-                            sender = '<a href=\"%s\">%s</a><font size="-1"> %s</font>&nbsp;<a href=\"%s\" alt="id@%s" style="display: none">🌐</a>' % ('','NINA','','',msg.id)
-                            await post_html_entry(server,msg.headline+'<br>'+msg.description,sender)
-                            print(msg)
+                for region in server.Region:
+                    for msg in n.warnings[region]:
+                        if msg.isValid():
+                            for event in events:
+                                nLastId = None
+                                if hasattr(event,'formatted_body'):
+                                    nLastId = extract_id(event.formatted_body)
+                                    if nLastId != msg.id:
+                                        nLastId = None
+                                    else: break
+                            if not nLastId:                        
+                                sender = '<a href=\"%s\">%s</a><font size="-1"> %s</font>&nbsp;<a href=\"%s\" alt="id@%s" style="display: none">🌐</a>' % ('','NINA','','',msg.id)
+                                await post_html_entry(server,msg.headline+'<br>'+msg.description,sender)
+                                print(msg)
             except ApiError as error:
                 await bot.api.send_text_message(server.room,str(error))
             except BaseException as e:
